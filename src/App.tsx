@@ -1,58 +1,90 @@
-import React, { useRef, useEffect } from "react";
-import Bookmarks from '@arcgis/core/widgets/Bookmarks';
-import Expand from '@arcgis/core/widgets/Expand';
+import { useEffect, useMemo, useRef, useState } from "react";
+import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
-import WebMap from "@arcgis/core/WebMap";
-
 import "./App.css";
+import { IBooleanRef, IMapViewRef, IProps, IViewArgs } from "./types";
 
-function App() {
-
-  const mapDiv = useRef(null);
+// hook to set additional MapView properties after init
+function useMapViewConfig({ mapViewReady, mapViewRef, properties }: IViewArgs) {
+  const appliedViewConfig: IBooleanRef = useRef(false);
 
   useEffect(() => {
-    if (mapDiv.current) {
-      /**
-       * Initialize application
-       */
-      const webmap = new WebMap({
-        portalItem: {
-          id: "aa1d3f80270146208328cf66d022e09c"
-        }
-      });
+    const view = mapViewRef.current;
 
-      const view = new MapView({
-        container: mapDiv.current,
-        map: webmap
-      });
-
-      const bookmarks = new Bookmarks({
-        view,
-        // allows bookmarks to be added, edited, or deleted
-        editingEnabled: true
-      });
-
-      const bkExpand = new Expand({
-        view,
-        content: bookmarks,
-        expanded: true
-      });
-
-      // Add the widget to the top-right corner of the view
-      view.ui.add(bkExpand, "top-right");
-
-      // bonus - how many bookmarks in the webmap?
-      webmap.when(() => {
-        if (webmap.bookmarks && webmap.bookmarks.length) {
-          console.log("Bookmarks: ", webmap.bookmarks.length);
-        } else {
-          console.log("No bookmarks in this webmap.");
-        }
-      });
+    if (appliedViewConfig.current) {
+      console.debug(
+        "--- View config already applied, did not set additional config"
+      );
     }
-  }, []);
 
-  return <div className="mapDiv" ref={mapDiv}></div>;
+    if (view && mapViewReady) {
+      view.set(properties);
+      appliedViewConfig.current = true;
+      console.debug("+++ set additional View config");
+    } else {
+      console.debug("??? View not ready, cannot set additional config");
+    }
+  }, [mapViewReady, mapViewRef, properties]);
 }
 
-export default App;
+export default function App({
+  basemap = "streets-vector",
+  center,
+  zoom = 13,
+}: IProps) {
+  /* setup to create the MapView --> */
+  const mapDiv = useRef(null);
+  const mapViewRef: IMapViewRef = useRef(null); // ref to store the MapView instance
+  const [mapViewReady, setMapViewReady] = useState(false);
+
+  useEffect(() => {
+    if (!mapViewRef.current) {
+      if (mapDiv.current) {
+        mapViewRef.current = new MapView({
+          container: mapDiv.current,
+          map: new Map({ basemap }),
+          center,
+          zoom,
+        });
+        setMapViewReady(true);
+        console.debug("+++ created MapView");
+      } else {
+        console.debug("??? container not ready, cannot add MapView");
+      }
+    } else {
+      console.debug("--- MapView already initialized, did not add MapView");
+    }
+  }, [basemap, center, zoom]);
+  /* <-- setup to create the MapView */
+
+  /* apply some conditional view config for small screens --> */
+  // set a state variable for whether it's a small screen or not
+  const [smallscreen, setSmallscreen] = useState(false);
+
+  // create a media query to detect a small screen and listen for changes
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 700px)");
+    mediaQuery.addEventListener("change", (e) => setSmallscreen(e.matches));
+    return () => {
+      mediaQuery.removeEventListener("change", (e) =>
+        setSmallscreen(e.matches)
+      );
+    };
+  }, []);
+
+  // create a memoized view config object to conditionally switch to the night basemap on small screens
+  const mobileViewConfig = useMemo(
+    () => ({
+      map: {
+        basemap: smallscreen ? "streets-night-vector" : basemap,
+      },
+    }),
+    [basemap, smallscreen]
+  );
+
+  // apply the view config
+  useMapViewConfig({ mapViewReady, mapViewRef, properties: mobileViewConfig });
+  /* <-- apply some conditional view config for small screens */
+
+  return <div id="mapDiv" ref={mapDiv}></div>;
+}
